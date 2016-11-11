@@ -13,6 +13,7 @@ from flocker.node.agents.blockdevice import UnknownVolume
 
 from functools import reduce
 import six
+from uuid import UUID
 from twisted.python.filepath import FilePath
 from zope.interface import implementer
 
@@ -78,7 +79,7 @@ class DigitalOceanDeviceAPI(object):
             vol = self._manager.get_volume(blockdevice_id)
             a.add_success_fields(volume={
                 'name': vol.name,
-                'region': vol.region.slug,
+                'region': vol.region["slug"],
                 'description': vol.description,
                 'attached_to': vol.droplet_ids
             })
@@ -93,7 +94,7 @@ class DigitalOceanDeviceAPI(object):
                  volume
         """
         if vol_name and vol_name.startswith(cls._PREFIX):
-            return six.text_type(vol_name)[len(cls._PREFIX):]
+            return UUID(vol_name[len(cls._PREFIX):])
         return None
 
     @staticmethod
@@ -209,7 +210,7 @@ class DigitalOceanDeviceAPI(object):
                 vol = self.get_volume(blockdevice_id)
                 if vol.droplet_ids:
                     raise AlreadyAttachedVolume(blockdevice_id)
-                vol.attach(attach_to, vol.region.slug)
+                vol.attach(attach_to, vol.region["slug"])
             except NotFoundError as _:
                 raise UnknownVolume(blockdevice_id)
 
@@ -222,7 +223,7 @@ class DigitalOceanDeviceAPI(object):
                 if not vol.droplet_ids:
                     raise UnattachedVolume(blockdevice_id)
                 detach_from = vol.droplet_ids[0]
-                region = vol.region.slug
+                region = vol.region["slug"]
                 vol.detach(detach_from, region)
                 a.add_success_fields(detached_from={
                     'droplet_id': detach_from,
@@ -234,11 +235,22 @@ class DigitalOceanDeviceAPI(object):
     def get_device_path(self, blockdevice_id):
         try:
             vol = self.get_volume(blockdevice_id)
+            path = FilePath(six.text_type(
+                    "/dev/disk/by-id/scsi-0DO_Volume_{name}").format(
+                    name=vol.name))
+
+            # Even if we are not attached, the agent needs to know the
+            # expected path for the convergence algorithm
             if not vol.droplet_ids:
-                raise UnattachedVolume(blockdevice_id)
-            return FilePath(six.text_type(
-                "/dev/disk/by-id/scsi-0DO_Volume_{name}").format(
-                name=vol.name))
+                return path
+
+            # But if we are attached, we might need to resolve the symlink
+            # noinspection PyBroadException
+            try:
+                return path.realpath()
+            except Exception as _:
+                return path
+
         except NotFoundError as _:
             raise UnknownVolume(blockdevice_id)
 
