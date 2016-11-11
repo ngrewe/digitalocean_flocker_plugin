@@ -16,8 +16,10 @@ Limitations
 
 * DO only allows you to mount 5 volumes to a single droplet
 * It is not yet enforced that clusters only span a single region
-* Effectively untested
+* Not extensively tested
 
 License
 -------
-Apache 2.0
+Copyright 2016 Niels Grewe
+
+Licensed under the Apache License, Version 2.0.
