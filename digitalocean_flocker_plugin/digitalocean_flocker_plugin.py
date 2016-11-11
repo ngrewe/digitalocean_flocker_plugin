@@ -27,8 +27,8 @@ class DigitalOceanDeviceAPI(object):
     - You need separate flocker clusters per region because volumes cannot be
       moved between regions.
     - Only five volumes can be attached to a droplet at any given time.
-    - It is possible for multiple flocker clusters to coexist, but they must not
-      share dataset IDs.
+    - It is possible for multiple flocker clusters to coexist, but they must
+      not share dataset IDs.
     """
 
     _ONE_GIB = int(GiB(1).to_Byte().value)
@@ -57,6 +57,10 @@ class DigitalOceanDeviceAPI(object):
 
     @property
     def volume_description(self):
+        """ Returns the description this flocker cluster should use
+
+        :return: The cluster ID property string to use as a description
+        """
         return six.text_type(
             "flocker-v1-cluster-id: {cluster_id}").format(
                 cluster_id=self._cluster_id)
@@ -82,12 +86,23 @@ class DigitalOceanDeviceAPI(object):
 
     @classmethod
     def _unmangle_dataset_name(cls, vol_name):
+        """Unmangles the flocker dataset from a digitial ocean volume name
+
+        :param vol_name: The name of the digitialocean volume
+        :return: The dataset name encoded therein or None, if not a flocker
+                 volume
+        """
         if vol_name and vol_name.startswith(cls._PREFIX):
             return six.text_type(vol_name)[len(cls._PREFIX):]
         return None
 
     @staticmethod
     def _to_block_device_volume(do_volume):
+        """Turns a digitialocean volume description into a flocker one
+
+        :param do_volume: The digital ocean volume
+        :return: The corresponding BlockDeviceVoume
+        """
         size = int(GiB(do_volume.size_gigabytes).to_Byte().value)
         attached = None
         if do_volume.droplet_ids:
@@ -100,6 +115,12 @@ class DigitalOceanDeviceAPI(object):
                                  dataset_id=dataset)
 
     def _categorize_do_volume(self, result_dict, vol):
+        """ Reduce function to categorise whether a volume is usable.
+        :param result_dict: A dictionary with three keys: ignored,
+                            wrong_cluster, and okay
+        :param vol: A digitialocean volume
+        :return: The result_dict with vol sorted into the correct slot
+        """
         if not six.text_type(vol.name).startswith(self ._PREFIX):
             result_dict["ignored"].append(vol)
         elif six.text_type(vol.description) != self.volume_description:
@@ -109,22 +130,17 @@ class DigitalOceanDeviceAPI(object):
         return result_dict
 
     def list_volumes(self):
-        """
-        Return the list of volumes currently provisioned using the API token
-
-        :return: A list of ``BlockDeviceVolume`` instances.
-        """
-
         with start_action(action_type=six.text_type(
-                              "flocker:node:agents:do:list_volumes")) as action:
+                              "flocker:node:agents:do:list_volumes")) as a:
             res = reduce(self._categorize_do_volume,
                          self._manager.get_all_volumes(),
                          dict(wrong_cluster=list(),
                               ignored=list(),
                               okay=list()))
-            Message.log(message_type=six.text_type("digitalocean:test"), result=res);
+
             if res["ignored"]:
-                ty = six.text_type("flocker:node:agents:do:list_volumes:ignored")
+                ty = six.text_type(
+                    "flocker:node:agents:do:list_volumes:ignored")
                 msg = six.text_type("Ignored {num} unrelated volumes").format(
                         num=len(res["ignored"]))
                 Message.log(message_type=ty,
@@ -144,7 +160,7 @@ class DigitalOceanDeviceAPI(object):
                                 volume=volume)
 
             volumes = map(self._to_block_device_volume, res["okay"])
-            action.add_success_fields(
+            a.add_success_fields(
                 cluster_volumes=list(
                     {
                         'blockdevice_id': v.blockdevice_id,
@@ -156,7 +172,8 @@ class DigitalOceanDeviceAPI(object):
 
     def create_volume(self, dataset_id, size):
         gib = Byte(size).to_GiB()
-        with start_action(action_type=six.text_type("flocker:node:agents:do:create_volume"),
+        with start_action(action_type=six.text_type(
+                "flocker:node:agents:do:create_volume"),
                 dataset_id=dataset_id, size=gib) as a:
             vol = Volume(token=self._manager.token)
             vol.name = self._PREFIX + dataset_id.hex
@@ -174,7 +191,8 @@ class DigitalOceanDeviceAPI(object):
             return self._to_block_device_volume(vol)
 
     def destroy_volume(self, blockdevice_id):
-        with start_action(action_type=six.text_type("flocker:node:agents:do:destroy_volume"),
+        with start_action(action_type=six.text_type(
+                "flocker:node:agents:do:destroy_volume"),
                 blockdevice_id=blockdevice_id):
             try:
                 vol = self.get_volume(blockdevice_id)
@@ -183,7 +201,8 @@ class DigitalOceanDeviceAPI(object):
                 raise UnknownVolume(blockdevice_id)
 
     def attach_volume(self, blockdevice_id, attach_to):
-        with start_action(action_type=six.text_type("flocker:node:agents:do:attach_volume"),
+        with start_action(action_type=six.text_type(
+                "flocker:node:agents:do:attach_volume"),
                 blockdevice_id=blockdevice_id,
                 droplet_id=attach_to):
             try:
@@ -195,7 +214,8 @@ class DigitalOceanDeviceAPI(object):
                 raise UnknownVolume(blockdevice_id)
 
     def detach_volume(self, blockdevice_id):
-        with start_action(action_type=six.text_type("flocker:node:agents:do:detach_volume"),
+        with start_action(action_type=six.text_type(
+                "flocker:node:agents:do:detach_volume"),
                 blockdevice_id=blockdevice_id) as a:
             try:
                 vol = self.get_volume(blockdevice_id)
@@ -217,12 +237,11 @@ class DigitalOceanDeviceAPI(object):
             if not vol.droplet_ids:
                 raise UnattachedVolume(blockdevice_id)
             return FilePath(six.text_type(
-                "/dev/disk/by-id/scsi-0DO_Volume_{name}").format(name=vol.name))
+                "/dev/disk/by-id/scsi-0DO_Volume_{name}").format(
+                name=vol.name))
         except NotFoundError as _:
             raise UnknownVolume(blockdevice_id)
 
 
 def do_from_configuration(cluster_id, token=None):
     return DigitalOceanDeviceAPI(cluster_id, token)
-
-
