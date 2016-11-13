@@ -100,29 +100,38 @@ class DigitalOceanDeviceAPI(object):
             return vol
 
     @classmethod
-    def _unmangle_dataset_name(cls, vol_name):
-        """Unmangles the flocker dataset from a digitial ocean volume name
+    def _unmangle_dataset(cls, vol_name):
+        """Unmangles the flocker dataset from a digital ocean volume name
 
-        :param vol_name: The name of the digitialocean volume
-        :return: The dataset name encoded therein or None, if not a flocker
+        :param vol_name: The name of the digitalocean volume
+        :return: The dataset UUID encoded therein or None, if not a flocker
                  volume
         """
         if vol_name and vol_name.startswith(cls._PREFIX):
             return UUID(vol_name[len(cls._PREFIX):])
         return None
 
+    @classmethod
+    def _mangle_dataset(cls, dataset_id):
+        """Mangles a flocker dataset UUID into a digital ocean volume name.
+
+        :param dataset_id: The UUID of the dataset
+        :return: The volumen name to use for the digitalocean volume
+        """
+        return cls._PREFIX + dataset_id.hex
+
     @staticmethod
     def _to_block_device_volume(do_volume):
-        """Turns a digitialocean volume description into a flocker one
+        """Turns a digitalocean volume description into a flocker one
 
         :param do_volume: The digital ocean volume
-        :return: The corresponding BlockDeviceVoume
+        :return: The corresponding BlockDeviceVolume
         """
         size = int(GiB(do_volume.size_gigabytes).to_Byte().value)
         attached = None
         if do_volume.droplet_ids:
             attached = six.text_type(do_volume.droplet_ids[0])
-        dataset = DigitalOceanDeviceAPI._unmangle_dataset_name(do_volume.name)
+        dataset = DigitalOceanDeviceAPI._unmangle_dataset(do_volume.name)
 
         return BlockDeviceVolume(blockdevice_id=six.text_type(do_volume.id),
                                  size=size,
@@ -133,7 +142,7 @@ class DigitalOceanDeviceAPI(object):
         """ Reduce function to categorise whether a volume is usable.
         :param result_dict: A dictionary with three keys: ignored,
                             wrong_cluster, and okay
-        :param vol: A digitialocean volume
+        :param vol: A digitalocean volume
         :return: The result_dict with vol sorted into the correct slot
         """
         if not six.text_type(vol.name).startswith(self ._PREFIX):
@@ -191,7 +200,7 @@ class DigitalOceanDeviceAPI(object):
                 "flocker:node:agents:do:create_volume"),
                 dataset_id=dataset_id, size=gib) as a:
             vol = Volume(token=self._manager.token)
-            vol.name = self._PREFIX + dataset_id.hex
+            vol.name = self._mangle_dataset(dataset_id)
             vol.size_gigabytes = int(gib.value)
             vol.region = self.metadata.region
             vol.description = self.volume_description

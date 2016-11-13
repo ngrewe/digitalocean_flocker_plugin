@@ -9,6 +9,5 @@ setup(
     license='Apache 2.0',
     install_requires=['python-digitalocean', 'six'],
     keywords='backend, plugin, flocker, docker, python',
-    packages=find_packages(),
-    # packages=find_packages(exclude=['test*']),
+    packages=find_packages(exclude=['test*']),
 )
