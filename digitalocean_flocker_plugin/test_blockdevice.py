@@ -9,16 +9,15 @@ import six
 import unittest
 import uuid
 
-
 VOLUME_MOCK_DATA = {
     '1234': {'name': 'flocker-v1-0ff663594f6347c8a950ff5de6f6225e',
-              'size_gigabytes': 100,
-              'droplet_ids': ['42'],
-              'region': {'slug': 'oxia-planum'}},
+             'size_gigabytes': 100,
+             'droplet_ids': ['42'],
+             'region': {'slug': 'oxia-planum'}},
     '1235': {'name': 'flocker-v1-55eacb0e962c4c60911fb43d34ec3f85',
-              'size_gigabytes': 50,
-              'droplet_ids': None,
-              'region': {'slug': 'oxia-planum'}},
+             'size_gigabytes': 50,
+             'droplet_ids': None,
+             'region': {'slug': 'oxia-planum'}},
     '1236': {'name': 'custom-volume',
              'size_gigabytes': 10,
              'droplet_ids': None,
@@ -28,14 +27,41 @@ VOLUME_MOCK_DATA = {
              'description': 'this-is-not-a-cluster-volume',
              'droplet_ids': None,
              'region': {'slug': 'oxia-planum'}},
-    '1238': {'name': 'flocker-v1-55eacb0e962c4c60911fb43d34ec3f85',
+    '1238': {'name': 'flocker-v1-3383db2340e54de9b1b4b13153a97be9',
              'size_gigabytes': 50,
-             'droplet_ids': None,
+             'droplet_ids': ['16'],
              'region': {'slug': 'biblis-tholus'}},
     }
 
+BLOCK_DEVICE_MOCK_DATA = {
+    BlockDeviceVolume(
+        blockdevice_id=six.text_type('1234'),
+        size=107374182400,
+        attached_to=six.text_type('42'),
+        dataset_id=uuid.UUID('0ff66359-4f63-47c8-a950-ff5de6f6225e')),
+    BlockDeviceVolume(
+        blockdevice_id=six.text_type('1235'),
+        size=53687091200,
+        attached_to=None,
+        dataset_id=uuid.UUID('55eacb0e-962c-4c60-911f-b43d34ec3f85')),
+    BlockDeviceVolume(
+        blockdevice_id=six.text_type('1238'),
+        size=53687091200,
+        attached_to=six.text_type('16'),
+        dataset_id=uuid.UUID('3383db23-40e5-4de9-b1b4-b13153a97be9'))}
+
 VOLUME_MOCK_KEYS = ['description', 'droplet_ids', 'name', 'region',
                     'size_gigabytes']
+
+
+class MockableVolume(digitalocean_flocker_plugin.Volume):
+    """Exposes the __init__ attributes of Volume for mocking """
+    id = None
+    name = None
+    description = None
+    droplet_ids = None
+    size_gigabytes = None
+
 
 def mock_set_metadata(instance):
     instance.droplet_id = '42'
@@ -51,9 +77,11 @@ class TestBlockDeviceAPI(unittest.TestCase):
         self._api = digitalocean_flocker_plugin.do_from_configuration(
             self._cluster_id, token='this-is-not-a-token')
 
-
-
     def _populate_volume(self, blockdevice_id, base_volume=None):
+        """ Take a block device ID from the mock list and turn it into a volume
+
+        :type blockdevice_id: str
+        """
         if not base_volume:
             base_volume = mock.create_autospec(Volume)
         template = VOLUME_MOCK_DATA[blockdevice_id]
@@ -62,7 +90,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
         base_volume.id = blockdevice_id
         for key in VOLUME_MOCK_KEYS:
-            if key is 'description' and not template.has_key('description'):
+            if key is 'description' and 'description' not in template:
                 setattr(base_volume, key, self._api.volume_description)
             else:
                 setattr(base_volume, key, template[key])
@@ -107,7 +135,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
     def test_volume_name_unrecognized(self):
         self.assertIsNone(self._api._unmangle_dataset('custom-volume'),
-                        'unrecognised name ignored')
+                          'unrecognised name ignored')
 
     @mock.patch('digitalocean.Volume', autospec=True)
     def test_volume_to_block_device(self, mock_volume):
@@ -151,11 +179,39 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
     @mock.patch.object(Manager, 'get_all_volumes', autospec=True)
     def test_list_volumes(self, mock_all_volumes):
+        # noinspection PyTypeChecker
         mock_all_volumes.return_value = map(self._populate_volume,
-                                            VOLUME_MOCK_DATA)
-        list = self._api.list_volumes()
-        self.assertGreaterEqual(1, mock_all_volumes.call_count,
+                                            VOLUME_MOCK_DATA.keys())
+        actual_list = self._api.list_volumes()
+        self.assertEqual(1, mock_all_volumes.call_count,
                          'volume list API called')
+        self.assertEqual(set(actual_list), BLOCK_DEVICE_MOCK_DATA,
+                         'correct volume list returned')
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    def test_get_volume(self, mock_get_volume):
+        volumes = dict(map(lambda k: (k, self._populate_volume(k)),
+                           VOLUME_MOCK_DATA.keys()))
+        mock_get_volume.side_effect = lambda s, x: volumes[x]
+        v = self._api.get_volume(six.text_type('1234'))
+        self.assertEqual(v, volumes['1234'])
+
+    @mock.patch.object(Metadata, 'load',
+                       autospec=True, side_effect=mock_set_metadata)
+    @mock.patch.object(digitalocean_flocker_plugin, 'Volume',
+                       autospec=MockableVolume)
+    def test_create_volume(self, mock_volume, _):
+        mock_volume.return_value.id = '1239'
+        dataset_id = uuid.UUID('1d5866a7-9d12-4497-a102-0f23ec4ae1c4')
+        self._api.create_volume(dataset_id, 107374182400)
+        mock_volume.assert_called_with(token='this-is-not-a-token')
+        self.assertEqual(1, mock_volume().create.call_count, 'create called')
+        self.assertEqual(mock_volume().name, six.text_type(
+            'flocker-v1-1d5866a79d124497a1020f23ec4ae1c4'))
+        self.assertEqual(mock_volume().description,
+                         self._api.volume_description, 'correct cluster')
+        self.assertEqual(mock_volume().size_gigabytes, 100, 'correct size')
+        self.assertEqual(mock_volume().region, 'oxia-planum', 'correct region')
 
     def tearDown(self):
         self._api = None
