@@ -1,11 +1,29 @@
+# Copyright 2016 Niels Grewe
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from digitalocean.Manager import Manager
 from digitalocean.Metadata import Metadata
 from digitalocean.Volume import Volume
 import digitalocean_flocker_plugin
+from flocker.node.agents.blockdevice import AlreadyAttachedVolume
 from flocker.node.agents.blockdevice import BlockDeviceVolume
+from flocker.node.agents.blockdevice import UnattachedVolume
+from flocker.node.agents.blockdevice import UnknownVolume
 from flocker.testtools import cluster_utils
 import mock
 import six
+from twisted.python.filepath import FilePath
 import unittest
 import uuid
 
@@ -86,7 +104,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
             base_volume = mock.create_autospec(Volume)
         template = VOLUME_MOCK_DATA[blockdevice_id]
         if not template:
-            raise ValueError('Mock data not available')
+            raise digitalocean_flocker_plugin.NotFoundError()
 
         base_volume.id = blockdevice_id
         for key in VOLUME_MOCK_KEYS:
@@ -212,6 +230,69 @@ class TestBlockDeviceAPI(unittest.TestCase):
                          self._api.volume_description, 'correct cluster')
         self.assertEqual(mock_volume().size_gigabytes, 100, 'correct size')
         self.assertEqual(mock_volume().region, 'oxia-planum', 'correct region')
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    @mock.patch('digitalocean.Volume', autospec=MockableVolume)
+    def test_destroy_volume(self, mock_volume, mock_get_volume):
+        volumes = dict(map(lambda k: (k,
+                                      self._populate_volume(k, mock_volume())),
+                           VOLUME_MOCK_DATA.keys()))
+        mock_get_volume.side_effect = lambda s, x: volumes[x]
+        self._api.destroy_volume('1234')
+        self.assertEqual(1, mock_volume().destroy.call_count,
+                         'volume destroyed')
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    def test_destroy_volume_nx(self, mock_get_volume):
+        volumes = dict(map(lambda k: (k,
+                                      self._populate_volume(k)),
+                           VOLUME_MOCK_DATA.keys()))
+
+        def _r():
+            raise digitalocean_flocker_plugin.NotFoundError
+
+        mock_get_volume.side_effect = lambda s, x: \
+            volumes[x] if x in volumes else _r()
+        with self.assertRaises(UnknownVolume):
+            self._api.destroy_volume(six.text_type('1240'))
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    def test_attach_volume_attached(self, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x)
+        with self.assertRaises(AlreadyAttachedVolume):
+            self._api.attach_volume(six.text_type('1234'), six.text_type('16'))
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    @mock.patch('digitalocean.Volume', autospec=MockableVolume)
+    def test_attach_volume(self, mock_volume, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x:\
+            self._populate_volume(x, mock_volume())
+        self._api.attach_volume(six.text_type('1235'), six.text_type('42'))
+        mock_volume().attach.assert_called_with(six.text_type('42'),
+                                                'oxia-planum')
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    def test_detach_volume_deattached(self, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x)
+        with self.assertRaises(UnattachedVolume):
+            self._api.detach_volume(six.text_type('1235'))
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    @mock.patch('digitalocean.Volume', autospec=MockableVolume)
+    def test_detach_volume(self, mock_volume, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x:\
+            self._populate_volume(x, mock_volume())
+        self._api.detach_volume(six.text_type('1234'))
+        mock_volume().detach.assert_called_with(six.text_type('42'),
+                                                'oxia-planum')
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    def test_device_path(self, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x)
+        self.assertEqual(FilePath(
+            six.text_type('/dev/disk/by-id/scsi-0DO_Volume_')
+            + six.text_type('flocker-v1-0ff663594f6347c8a950ff5de6f6225e')),
+                         self._api.get_device_path(six.text_type('1234')))
 
     def tearDown(self):
         self._api = None
