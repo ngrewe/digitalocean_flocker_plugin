@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from digitalocean import Droplet
 from digitalocean.Manager import Manager
 from digitalocean.Metadata import Metadata
 from digitalocean.Volume import Volume
@@ -290,9 +291,83 @@ class TestBlockDeviceAPI(unittest.TestCase):
     def test_device_path(self, mock_get_volume):
         mock_get_volume.side_effect = lambda s, x: self._populate_volume(x)
         self.assertEqual(FilePath(
-            six.text_type('/dev/disk/by-id/scsi-0DO_Volume_')
-            + six.text_type('flocker-v1-0ff663594f6347c8a950ff5de6f6225e')),
+            six.text_type('/dev/disk/by-id/scsi-0DO_Volume_') +
+            six.text_type('flocker-v1-0ff663594f6347c8a950ff5de6f6225e')),
                          self._api.get_device_path(six.text_type('1234')))
+
+    def tearDown(self):
+        self._api = None
+        self._cluster_id = None
+
+
+INSTANCE_MOCK_DATA = {
+    six.text_type("42"): {
+        "id": 42,
+        "status": "active"
+    },
+    six.text_type("16"): {
+        "id": 16,
+        "status": "active"
+    },
+    six.text_type("32"): {
+        "id": 32,
+        "status": "off"
+    }
+}
+
+
+class MockableDroplet(Droplet):
+    id = None
+    name = None
+    status = None
+
+
+class TestCloudAPI(unittest.TestCase):
+
+    def setUp(self):
+        self._cluster_id = cluster_utils.make_cluster_id(
+            cluster_utils.TestTypes.FUNCTIONAL)
+        self._api = digitalocean_flocker_plugin.do_from_configuration(
+            self._cluster_id, token='this-is-not-a-token')
+
+    @staticmethod
+    def _populate_droplet(droplet_id, base_droplet=None):
+        """ Take a droplet ID from the mock list and turn it into a droplet"""
+        if not base_droplet:
+                return Droplet(**INSTANCE_MOCK_DATA[droplet_id])
+
+        template = INSTANCE_MOCK_DATA[droplet_id]
+
+        for key in template.keys():
+            setattr(base_droplet, key, template[key])
+        return base_droplet
+
+    @mock.patch.object(Manager, 'get_all_droplets', autospec=True)
+    def test_list_live_nodes(self, mock_all_droplets):
+        mock_all_droplets.return_value = map(self._populate_droplet,
+                                             INSTANCE_MOCK_DATA.keys())
+        nodes = self._api.list_live_nodes()
+        self.assertSetEqual(set(nodes), {six.text_type("16"),
+                                         six.text_type("42")},
+                            'Live nodes returned')
+
+    @mock.patch.object(Manager, 'get_droplet', autospec=True)
+    @mock.patch('digitalocean.Droplet', autospec=MockableDroplet)
+    def test_start_node(self, mock_droplet, mock_get_droplet):
+        mock_get_droplet.side_effect = lambda s, x: \
+            self._populate_droplet(x, mock_droplet())
+        self._api.start_node(six.text_type('32'))
+        self.assertEqual(1, mock_droplet().power_on.call_count,
+                         'Node started')
+
+    @mock.patch.object(Manager, 'get_droplet', autospec=True)
+    @mock.patch('digitalocean.Droplet', autospec=MockableDroplet)
+    def test_start_node_running(self, mock_droplet, mock_get_droplet):
+        mock_get_droplet.side_effect = lambda s, x: \
+            self._populate_droplet(x, mock_droplet())
+        self._api.start_node(six.text_type('16'))
+        self.assertEqual(0, mock_droplet().power_on.call_count,
+                         'Running node node started again')
 
     def tearDown(self):
         self._api = None
