@@ -14,7 +14,7 @@
 
 from bitmath import Byte, GiB
 from digitalocean import Manager
-from digitalocean import Volume
+from digitalocean import Volume as Vol
 from digitalocean.baseapi import NotFoundError
 from digitalocean.Metadata import Metadata
 from eliot import Message
@@ -51,6 +51,10 @@ class DigitalOceanDeviceAPI(object):
     _ONE_GIB = int(GiB(1).to_Byte().value)
 
     _PREFIX = six.text_type("flocker-v1-")
+
+    # We reassign the Volume class as an attribute to help ergonomics in our
+    # test suite.
+    Volume = Vol
 
     def __init__(self, cluster_id, token):
         self._cluster_id = six.text_type(cluster_id)
@@ -201,7 +205,7 @@ class DigitalOceanDeviceAPI(object):
         with start_action(action_type=six.text_type(
                 "flocker:node:agents:do:create_volume"),
                 dataset_id=dataset_id, size=gib) as a:
-            vol = Volume(token=self._manager.token)
+            vol = self.Volume(token=self._manager.token)
             vol.name = self._mangle_dataset(dataset_id)
             vol.size_gigabytes = int(gib.value)
             vol.region = self.metadata.region

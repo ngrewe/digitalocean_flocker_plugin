@@ -12,11 +12,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from digitalocean import baseapi
 from digitalocean import Droplet
 from digitalocean.Manager import Manager
 from digitalocean.Metadata import Metadata
-from digitalocean.Volume import Volume
-import digitalocean_flocker_plugin
+from ..digitalocean_flocker_plugin import DigitalOceanDeviceAPI
+from digitalocean_flocker_plugin import digitalocean_flocker_plugin
 from flocker.node.agents.blockdevice import AlreadyAttachedVolume
 from flocker.node.agents.blockdevice import BlockDeviceVolume
 from flocker.node.agents.blockdevice import UnattachedVolume
@@ -73,7 +74,7 @@ VOLUME_MOCK_KEYS = ['description', 'droplet_ids', 'name', 'region',
                     'size_gigabytes']
 
 
-class MockableVolume(digitalocean_flocker_plugin.Volume):
+class MockableVolume(DigitalOceanDeviceAPI.Volume):
     """Exposes the __init__ attributes of Volume for mocking """
     id = None
     name = None
@@ -102,10 +103,10 @@ class TestBlockDeviceAPI(unittest.TestCase):
         :type blockdevice_id: str
         """
         if not base_volume:
-            base_volume = mock.create_autospec(Volume)
+            base_volume = mock.create_autospec(MockableVolume)
         template = VOLUME_MOCK_DATA[blockdevice_id]
         if not template:
-            raise digitalocean_flocker_plugin.NotFoundError()
+            raise baseapi.NotFoundError()
 
         base_volume.id = blockdevice_id
         for key in VOLUME_MOCK_KEYS:
@@ -217,7 +218,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
     @mock.patch.object(Metadata, 'load',
                        autospec=True, side_effect=mock_set_metadata)
-    @mock.patch.object(digitalocean_flocker_plugin, 'Volume',
+    @mock.patch.object(DigitalOceanDeviceAPI, 'Volume',
                        autospec=MockableVolume)
     def test_create_volume(self, mock_volume, _):
         mock_volume.return_value.id = '1239'
@@ -250,7 +251,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
                            VOLUME_MOCK_DATA.keys()))
 
         def _r():
-            raise digitalocean_flocker_plugin.NotFoundError
+            raise baseapi.NotFoundError()
 
         mock_get_volume.side_effect = lambda s, x: \
             volumes[x] if x in volumes else _r()
