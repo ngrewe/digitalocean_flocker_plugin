@@ -22,6 +22,7 @@ from eliot import start_action
 from flocker.node.agents.blockdevice import AlreadyAttachedVolume
 from flocker.node.agents.blockdevice import BlockDeviceVolume
 from flocker.node.agents.blockdevice import IBlockDeviceAPI
+from flocker.node.agents.blockdevice import ICloudAPI
 from flocker.node.agents.blockdevice import UnattachedVolume
 from flocker.node.agents.blockdevice import UnknownVolume
 
@@ -33,6 +34,7 @@ from zope.interface import implementer
 
 
 @implementer(IBlockDeviceAPI)
+@implementer(ICloudAPI)
 class DigitalOceanDeviceAPI(object):
     """
     A block device implementation for DigitalOcean block storage.
@@ -276,6 +278,16 @@ class DigitalOceanDeviceAPI(object):
 
         except NotFoundError as _:
             raise UnknownVolume(blockdevice_id)
+
+    def list_live_nodes(self):
+        return map(lambda x: six.text_type(x.id),
+                   filter(lambda x: x.status == 'active',
+                          self._manager.get_all_droplets()))
+
+    def start_node(self, compute_instance_id):
+        droplet = self._manager.get_droplet(compute_instance_id)
+        if droplet.status != 'active':
+            droplet.power_on()
 
 
 def do_from_configuration(cluster_id, token=None):
