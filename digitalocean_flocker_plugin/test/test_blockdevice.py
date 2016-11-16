@@ -240,7 +240,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
                                       self._populate_volume(k, mock_volume())),
                            VOLUME_MOCK_DATA.keys()))
         mock_get_volume.side_effect = lambda s, x: volumes[x]
-        self._api.destroy_volume('1234')
+        self._api.destroy_volume('1235')
         self.assertEqual(1, mock_volume().destroy.call_count,
                          'volume destroyed')
 
@@ -257,6 +257,16 @@ class TestBlockDeviceAPI(unittest.TestCase):
             volumes[x] if x in volumes else _r()
         with self.assertRaises(UnknownVolume):
             self._api.destroy_volume(six.text_type('1240'))
+
+    @mock.patch.object(Manager, 'get_volume', autospec=True)
+    @mock.patch('digitalocean.Volume', autospec=MockableVolume)
+    def test_destroy_volume_attached(self, mock_volume, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x, mock_volume())
+        self._api.destroy_volume('1234')
+        self.assertEqual(1, mock_volume().detach.call_count,
+                         'volume detached prior to destruction')
+        self.assertEqual(1, mock_volume().destroy.call_count,
+                         'volume destroyed')
 
     @mock.patch.object(Manager, 'get_volume', autospec=True)
     def test_attach_volume_attached(self, mock_get_volume):

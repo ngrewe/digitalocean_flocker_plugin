@@ -226,6 +226,10 @@ class DigitalOceanDeviceAPI(object):
                 blockdevice_id=blockdevice_id):
             try:
                 vol = self.get_volume(blockdevice_id)
+                if vol.droplet_ids:
+                    # need to detach prior to deletion
+                    vol.detach(vol.droplet_ids[0],
+                               vol.region['slug'])
                 vol.destroy()
             except NotFoundError as _:
                 raise UnknownVolume(blockdevice_id)
