@@ -182,12 +182,13 @@ class DigitalOceanDeviceAPI(object):
                 ty = six.text_type("flocker:node:agents:do") \
                      + six.text_type(":list_volumes:suspicious_disk")
                 msg = six.text_type("Volume follows naming convention but") \
-                    + six.text_type("is not owned by our cluster.")
+                    + six.text_type(" is not owned by our cluster.")
                 for volume in res["wrong_cluster"]:
                     Message.log(message_type=ty,
                                 log_level=six.text_type("ERROR"),
                                 message=msg,
-                                volume=volume)
+                                volume=volume.name,
+                                description=volume.description)
 
             volumes = map(self._to_block_device_volume, res["okay"])
             a.add_success_fields(
@@ -204,7 +205,8 @@ class DigitalOceanDeviceAPI(object):
         gib = Byte(size).to_GiB()
         with start_action(action_type=six.text_type(
                 "flocker:node:agents:do:create_volume"),
-                dataset_id=dataset_id, size=gib) as a:
+                dataset_id=six.text_type(dataset_id),
+                size=size) as a:
             vol = self.Volume(token=self._manager.token)
             vol.name = self._mangle_dataset(dataset_id)
             vol.size_gigabytes = int(gib.value)
@@ -213,8 +215,6 @@ class DigitalOceanDeviceAPI(object):
             vol.create()
             a.add_success_fields(volume={
                     'blockdevice_id': vol.id,
-                    'size': size,
-                    'dataset_id': dataset_id,
                     'region': vol.region
                 }
             )
@@ -228,8 +228,17 @@ class DigitalOceanDeviceAPI(object):
                 vol = self.get_volume(blockdevice_id)
                 if vol.droplet_ids:
                     # need to detach prior to deletion
+                    ty = six.text_type('flocker:node:agents:do:destroy_volume') +\
+                         six.text_type(':detach_needed')
+                    Message.log(message_type=ty,
+                                log_level=six.text_type('INFO'),
+                                message=six.text_type(
+                                    'Volume needs to be detached first'),
+                                volume=vol.id,
+                                attached_to=vol.droplet_ids[0])
                     vol.detach(vol.droplet_ids[0],
                                vol.region['slug'])
+
                 vol.destroy()
             except NotFoundError as _:
                 raise UnknownVolume(blockdevice_id)
