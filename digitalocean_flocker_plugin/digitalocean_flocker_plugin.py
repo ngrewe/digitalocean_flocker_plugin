@@ -283,8 +283,10 @@ class DigitalOceanDeviceAPI(object):
 
             # Even if we are not attached, the agent needs to know the
             # expected path for the convergence algorithm
+            # FIXME: The functional tests seem to indicate otherwise
             if not vol.droplet_ids:
-                return path
+                # return path
+                raise UnattachedVolume(blockdevice_id)
 
             # But if we are attached, we might need to resolve the symlink
             # noinspection PyBroadException
