@@ -15,6 +15,7 @@
 from bitmath import Byte, GiB
 from digitalocean import Manager
 from digitalocean import Volume as Vol
+from digitalocean import Action as Act
 from digitalocean.baseapi import NotFoundError
 from digitalocean.Metadata import Metadata
 from eliot import Message
@@ -25,9 +26,10 @@ from flocker.node.agents.blockdevice import IBlockDeviceAPI
 from flocker.node.agents.blockdevice import ICloudAPI
 from flocker.node.agents.blockdevice import UnattachedVolume
 from flocker.node.agents.blockdevice import UnknownVolume
-
 from functools import reduce
+from sched import scheduler
 import six
+import time
 from uuid import UUID
 from twisted.python.filepath import FilePath
 from zope.interface import implementer
@@ -55,11 +57,14 @@ class DigitalOceanDeviceAPI(object):
     # We reassign the Volume class as an attribute to help ergonomics in our
     # test suite.
     Volume = Vol
+    Action = Act
 
     def __init__(self, cluster_id, token):
         self._cluster_id = six.text_type(cluster_id)
         self._manager = Manager(token=token)
         self._metadata = None
+        self._poll = 1
+        self._timeout = 60
 
     @property
     def metadata(self):
@@ -159,6 +164,22 @@ class DigitalOceanDeviceAPI(object):
             result_dict["okay"].append(vol)
         return result_dict
 
+    def _should_wait_on(self, action, from_time):
+        return not action or (action.status == 'in-progress' and
+                              (time.time() - from_time < self._timeout))
+
+    def _await_action(self, action_id):
+        s = scheduler(time.time, time.sleep)
+        started_at = time.time()
+        action = self.Action.get_object(self._manager.token,
+                                        action_id)
+        while self._should_wait_on(action, started_at):
+            delta = max(0, min(self._poll,
+                               self._timeout - (time.time() - started_at)))
+            s.enter(delta, 0, lambda x: x.load_directly(), (action,))
+            s.run()
+        return action and action.status == 'completed'
+
     def list_volumes(self):
         with start_action(action_type=six.text_type(
                               "flocker:node:agents:do:list_volumes")) as a:
@@ -236,8 +257,9 @@ class DigitalOceanDeviceAPI(object):
                                     'Volume needs to be detached first'),
                                 volume=vol.id,
                                 attached_to=vol.droplet_ids[0])
-                    vol.detach(vol.droplet_ids[0],
-                               vol.region['slug'])
+                    r = vol.detach(vol.droplet_ids[0],
+                                   vol.region['slug'])
+                    self._await_action(r['action']['id'])
 
                 vol.destroy()
             except NotFoundError as _:
@@ -252,7 +274,10 @@ class DigitalOceanDeviceAPI(object):
                 vol = self.get_volume(blockdevice_id)
                 if vol.droplet_ids:
                     raise AlreadyAttachedVolume(blockdevice_id)
-                vol.attach(attach_to, vol.region["slug"])
+                r = vol.attach(attach_to, vol.region["slug"])
+                if self._await_action(r['action']['id']):
+                    vol.droplet_ids = [attach_to]
+                return self._to_block_device_volume(vol)
             except NotFoundError as _:
                 raise UnknownVolume(blockdevice_id)
 
@@ -266,11 +291,15 @@ class DigitalOceanDeviceAPI(object):
                     raise UnattachedVolume(blockdevice_id)
                 detach_from = vol.droplet_ids[0]
                 region = vol.region["slug"]
-                vol.detach(detach_from, region)
+                r = vol.detach(detach_from, region)
+
+                if self._await_action(r['action']['id']):
+                    vol.droplet_ids = None
                 a.add_success_fields(detached_from={
                     'droplet_id': detach_from,
                     'region': region
                 })
+                return self._to_block_device_volume(vol)
             except NotFoundError as _:
                 raise UnknownVolume(blockdevice_id)
 

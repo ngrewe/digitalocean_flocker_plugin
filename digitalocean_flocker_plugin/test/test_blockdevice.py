@@ -235,11 +235,10 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
     @mock.patch.object(Manager, 'get_volume', autospec=True)
     @mock.patch('digitalocean.Volume', autospec=MockableVolume)
-    def test_destroy_volume(self, mock_volume, mock_get_volume):
-        volumes = dict(map(lambda k: (k,
-                                      self._populate_volume(k, mock_volume())),
-                           VOLUME_MOCK_DATA.keys()))
-        mock_get_volume.side_effect = lambda s, x: volumes[x]
+    @mock.patch.object(DigitalOceanDeviceAPI, 'Action', autospec=True)
+    def test_destroy_volume(self, mock_action, mock_volume, mock_get_volume):
+        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x, mock_volume())
+        mock_action.get_object.status = 'completed'
         self._api.destroy_volume('1235')
         self.assertEqual(1, mock_volume().destroy.call_count,
                          'volume destroyed')
@@ -259,9 +258,13 @@ class TestBlockDeviceAPI(unittest.TestCase):
             self._api.destroy_volume(six.text_type('1240'))
 
     @mock.patch.object(Manager, 'get_volume', autospec=True)
+    @mock.patch.object(DigitalOceanDeviceAPI, 'Action', autospec=True)
     @mock.patch('digitalocean.Volume', autospec=MockableVolume)
-    def test_destroy_volume_attached(self, mock_volume, mock_get_volume):
-        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x, mock_volume())
+    def test_destroy_volume_attached(self, mock_volume, mock_action,
+                                     mock_get_volume):
+        mock_action.get_object.status = 'completed'
+        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x,
+                                                                mock_volume())
         self._api.destroy_volume('1234')
         self.assertEqual(1, mock_volume().detach.call_count,
                          'volume detached prior to destruction')
@@ -276,9 +279,11 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
     @mock.patch.object(Manager, 'get_volume', autospec=True)
     @mock.patch('digitalocean.Volume', autospec=MockableVolume)
-    def test_attach_volume(self, mock_volume, mock_get_volume):
+    @mock.patch.object(DigitalOceanDeviceAPI, 'Action', autospec=True)
+    def test_attach_volume(self, mock_action, mock_volume, mock_get_volume):
         mock_get_volume.side_effect = lambda s, x:\
             self._populate_volume(x, mock_volume())
+        mock_action.get_object.status = 'completed'
         self._api.attach_volume(six.text_type('1235'), six.text_type('42'))
         mock_volume().attach.assert_called_with(six.text_type('42'),
                                                 'oxia-planum')
@@ -291,9 +296,11 @@ class TestBlockDeviceAPI(unittest.TestCase):
 
     @mock.patch.object(Manager, 'get_volume', autospec=True)
     @mock.patch('digitalocean.Volume', autospec=MockableVolume)
-    def test_detach_volume(self, mock_volume, mock_get_volume):
+    @mock.patch.object(DigitalOceanDeviceAPI, 'Action', autospec=True)
+    def test_detach_volume(self, mock_action, mock_volume, mock_get_volume):
         mock_get_volume.side_effect = lambda s, x:\
             self._populate_volume(x, mock_volume())
+        mock_action.get_object.status = 'completed'
         self._api.detach_volume(six.text_type('1234'))
         mock_volume().detach.assert_called_with(six.text_type('42'),
                                                 'oxia-planum')
