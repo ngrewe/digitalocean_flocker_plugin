@@ -168,11 +168,14 @@ class DigitalOceanDeviceAPI(object):
         return not action or (action.status == 'in-progress' and
                               (time.time() - from_time < self._timeout))
 
-    def _await_action(self, action_id):
-        s = scheduler(time.time, time.sleep)
-        started_at = time.time()
+    def _await_action_id(self, action_id):
         action = self.Action.get_object(self._manager.token,
                                         action_id)
+        self._await_action(action)
+
+    def _await_action(self, action):
+        s = scheduler(time.time, time.sleep)
+        started_at = time.time()
         while self._should_wait_on(action, started_at):
             delta = max(0, min(self._poll,
                                self._timeout - (time.time() - started_at)))
@@ -259,7 +262,7 @@ class DigitalOceanDeviceAPI(object):
                                 attached_to=vol.droplet_ids[0])
                     r = vol.detach(vol.droplet_ids[0],
                                    vol.region['slug'])
-                    self._await_action(r['action']['id'])
+                    self._await_action_id(r['action']['id'])
 
                 vol.destroy()
             except NotFoundError as _:
@@ -275,7 +278,7 @@ class DigitalOceanDeviceAPI(object):
                 if vol.droplet_ids:
                     raise AlreadyAttachedVolume(blockdevice_id)
                 r = vol.attach(attach_to, vol.region["slug"])
-                if self._await_action(r['action']['id']):
+                if self._await_action_id(r['action']['id']):
                     vol.droplet_ids = [attach_to]
                 return self._to_block_device_volume(vol)
             except NotFoundError as _:
@@ -293,7 +296,7 @@ class DigitalOceanDeviceAPI(object):
                 region = vol.region["slug"]
                 r = vol.detach(detach_from, region)
 
-                if self._await_action(r['action']['id']):
+                if self._await_action_id(r['action']['id']):
                     vol.droplet_ids = None
                 a.add_success_fields(detached_from={
                     'droplet_id': detach_from,
@@ -335,8 +338,8 @@ class DigitalOceanDeviceAPI(object):
     def start_node(self, compute_instance_id):
         droplet = self._manager.get_droplet(compute_instance_id)
         if droplet.status != 'active':
-            droplet.power_on()
-
+            action = droplet.power_on(return_dict=False)
+            self._await_action(action)
 
 def do_from_configuration(cluster_id, token=None):
     return DigitalOceanDeviceAPI(cluster_id, token)

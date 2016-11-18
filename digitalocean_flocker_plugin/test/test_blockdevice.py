@@ -237,7 +237,8 @@ class TestBlockDeviceAPI(unittest.TestCase):
     @mock.patch('digitalocean.Volume', autospec=MockableVolume)
     @mock.patch.object(DigitalOceanDeviceAPI, 'Action', autospec=True)
     def test_destroy_volume(self, mock_action, mock_volume, mock_get_volume):
-        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x, mock_volume())
+        mock_get_volume.side_effect = lambda s, x: \
+            self._populate_volume(x, mock_volume())
         mock_action.get_object.status = 'completed'
         self._api.destroy_volume('1235')
         self.assertEqual(1, mock_volume().destroy.call_count,
@@ -263,8 +264,8 @@ class TestBlockDeviceAPI(unittest.TestCase):
     def test_destroy_volume_attached(self, mock_volume, mock_action,
                                      mock_get_volume):
         mock_action.get_object.status = 'completed'
-        mock_get_volume.side_effect = lambda s, x: self._populate_volume(x,
-                                                                mock_volume())
+        mock_get_volume.side_effect = lambda s, x: \
+            self._populate_volume(x, mock_volume())
         self._api.destroy_volume('1234')
         self.assertEqual(1, mock_volume().detach.call_count,
                          'volume detached prior to destruction')
@@ -371,7 +372,10 @@ class TestCloudAPI(unittest.TestCase):
 
     @mock.patch.object(Manager, 'get_droplet', autospec=True)
     @mock.patch('digitalocean.Droplet', autospec=MockableDroplet)
-    def test_start_node(self, mock_droplet, mock_get_droplet):
+    @mock.patch.object(DigitalOceanDeviceAPI, 'Action', autospec=True)
+    def test_start_node(self, mock_action, mock_droplet, mock_get_droplet):
+        mock_action().status = 'completed'
+        mock_droplet().power_on.return_value = mock_action()
         mock_get_droplet.side_effect = lambda s, x: \
             self._populate_droplet(x, mock_droplet())
         self._api.start_node(six.text_type('32'))
