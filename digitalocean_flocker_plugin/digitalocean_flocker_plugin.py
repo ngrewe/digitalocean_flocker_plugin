@@ -35,6 +35,10 @@ from twisted.python.filepath import FilePath
 from zope.interface import implementer
 
 
+class DOException(Exception):
+    pass
+
+
 @implementer(IBlockDeviceAPI)
 @implementer(ICloudAPI)
 class DigitalOceanDeviceAPI(object):
@@ -175,12 +179,38 @@ class DigitalOceanDeviceAPI(object):
 
     def _await_action(self, action):
         s = scheduler(time.time, time.sleep)
+        i = 0
         started_at = time.time()
-        while self._should_wait_on(action, started_at):
-            delta = max(0, min(self._poll,
-                               self._timeout - (time.time() - started_at)))
-            s.enter(delta, 0, lambda x: x.load_directly(), (action,))
-            s.run()
+        if action and action.status == 'completed':
+            return True
+        elif not action:
+            return False
+        with start_action(action_type=six.text_type(
+                'flocker:node:agents:do:await'), do_action_type=action.type,
+                          do_action_id=action.id) as ac:
+            while self._should_wait_on(action, started_at):
+                delta = max(0, min(self._poll,
+                                   self._timeout - (time.time() - started_at)))
+                s.enter(delta, 0, lambda x: x.load_directly(), (action,))
+                s.run()
+                i += 1
+            if action.status == 'completed':
+                ac.add_success_fields(iterations=i,
+                                      do_action_status='completed')
+            else:
+                Message.log(message_type=six.text_type(
+                    'flocker:node:agents:do:await:err'),
+                            log_level=six.text_type('ERROR'),
+                            message=six.text_type('Wait unsuccesful'),
+                            iteration=i,
+                            do_action_status=action.status
+                )
+                if action.status == 'in-progress':
+                    raise DOException('Wait timeout')
+                else:
+                    raise DOException(six.text_type('Action failed ({r})').
+                                      format(r=action.status))
+
         return action and action.status == 'completed'
 
     def list_volumes(self):
@@ -252,8 +282,8 @@ class DigitalOceanDeviceAPI(object):
                 vol = self.get_volume(blockdevice_id)
                 if vol.droplet_ids:
                     # need to detach prior to deletion
-                    ty = six.text_type('flocker:node:agents:do:destroy_volume') +\
-                         six.text_type(':detach_needed')
+                    ty = six.text_type('flocker:node:agents:do') + \
+                         six.text_type(':destroy:detach_needed')
                     Message.log(message_type=ty,
                                 log_level=six.text_type('INFO'),
                                 message=six.text_type(
@@ -340,6 +370,7 @@ class DigitalOceanDeviceAPI(object):
         if droplet.status != 'active':
             action = droplet.power_on(return_dict=False)
             self._await_action(action)
+
 
 def do_from_configuration(cluster_id, token=None):
     return DigitalOceanDeviceAPI(cluster_id, token)
