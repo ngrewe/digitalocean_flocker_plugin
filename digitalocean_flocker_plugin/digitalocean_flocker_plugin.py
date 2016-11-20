@@ -202,7 +202,7 @@ class DigitalOceanDeviceAPI(object):
                     'flocker:node:agents:do:await:err'),
                             log_level=six.text_type('ERROR'),
                             message=six.text_type('Wait unsuccesful'),
-                            iteration=i,
+                            iterations=i,
                             do_action_status=action.status
                 )
                 if action.status == 'in-progress':
