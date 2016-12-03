@@ -55,7 +55,7 @@ class DigitalOceanDeviceAPI(object):
 
     :ivar six.text_type _cluster_id: ID of the cluster
     :ivar Manager _manager: The DO manager object
-    :ivar Metadata _metadata: Metadata of the node runnign the agent (nullable)
+    :ivar Metadata _metadata: Metadata of the node running the agent (nullable)
     :ivar float _poll: Interval for polling state changes of actions, in seconds
     :ivar float _timeout: Maximum duration to wait for an action to complete
     """
