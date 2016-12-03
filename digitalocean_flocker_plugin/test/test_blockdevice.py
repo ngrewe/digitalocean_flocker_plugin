@@ -314,6 +314,30 @@ class TestBlockDeviceAPI(unittest.TestCase):
             six.text_type('flocker-v1-0ff663594f6347c8a950ff5de6f6225e')),
                          self._api.get_device_path(six.text_type('1234')))
 
+    def test_polling(self):
+
+        class Arg(object):
+
+            def __init__(self):
+                self.count = 0
+
+            def poll(self):
+                self.count += 3
+
+            def done(self):
+                return self.count == 3
+
+        arg = Arg()
+        old_poll = self._api._poll
+        try:
+            self._api._poll = 0.001
+            i = self._api._iterations_until(lambda x: x.done(),
+                                            lambda x: x.poll(),
+                                            (arg,))
+            self.assertEqual(1, i, 'polled once')
+        finally:
+            self._poll = old_poll
+
     def tearDown(self):
         self._api = None
         self._cluster_id = None

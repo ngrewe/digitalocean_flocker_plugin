@@ -10,18 +10,21 @@ import six
 def do_blockdeviceapi_for_test(test_case):
     return get_blockdeviceapi_with_cleanup(test_case)
 
+
 MIN_ALLOCATION_SIZE = GiB(1).to_Byte().value
 
 MIN_ALLOCATION_UNIT = GiB(1).to_Byte().value
 
 
-class DigitialOceanBlockDeviceAPITests(
+class DigitalOceanBlockDeviceAPITests(
     make_iblockdeviceapi_tests(
         blockdevice_api_factory=do_blockdeviceapi_for_test,
         unknown_blockdevice_id_factory=lambda x: six.text_type(2147483647))):
-    """Functional tests for ``IBlockDeviceAPI`` implementation for DigitalOcean"""
+    """Functional tests for DigitalOcean ``IBlockDeviceAPI`` implementation
+        """
 
 
-class DigitalOceanCloudeAPITests(
-    make_icloudapi_tests(blockdevice_api_factory=do_blockdeviceapi_for_test)):
-    """Functional tests for ``ICloudAPI`` implementation for DigitalOcean"""
+class DigitalOceanCloudAPITests(
+    make_icloudapi_tests(
+        blockdevice_api_factory=do_blockdeviceapi_for_test)):
+    """Functional tests for DigitalOcean ``ICloudAPI`` implementation"""

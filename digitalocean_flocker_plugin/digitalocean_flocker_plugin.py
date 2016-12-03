@@ -58,8 +58,8 @@ class DigitalOceanDeviceAPI(object):
 
     _PREFIX = six.text_type("flocker-v1-")
 
-    # We reassign the Volume class as an attribute to help ergonomics in our
-    # test suite.
+    # We reassign the Volume and Action class as attributes to help
+    # ergonomics in our test suite.
     Volume = Vol
     Action = Act
 
@@ -168,19 +168,12 @@ class DigitalOceanDeviceAPI(object):
             result_dict["okay"].append(vol)
         return result_dict
 
-    def _should_wait_on(self, action, from_time):
-        return not action or (action.status == 'in-progress' and
-                              (time.time() - from_time < self._timeout))
-
     def _await_action_id(self, action_id):
         action = self.Action.get_object(self._manager.token,
                                         action_id)
-        self._await_action(action)
+        return self._await_action(action)
 
     def _await_action(self, action):
-        s = scheduler(time.time, time.sleep)
-        i = 0
-        started_at = time.time()
         if action and action.status == 'completed':
             return True
         elif not action:
@@ -188,12 +181,10 @@ class DigitalOceanDeviceAPI(object):
         with start_action(action_type=six.text_type(
                 'flocker:node:agents:do:await'), do_action_type=action.type,
                           do_action_id=action.id) as ac:
-            while self._should_wait_on(action, started_at):
-                delta = max(0, min(self._poll,
-                                   self._timeout - (time.time() - started_at)))
-                s.enter(delta, 0, lambda x: x.load_directly(), (action,))
-                s.run()
-                i += 1
+            i = self._iterations_until(lambda x: not x or x.status !=
+                                       'in-progress',
+                                       lambda x: x.load_directly(), (action,))
+
             if action.status == 'completed':
                 ac.add_success_fields(iterations=i,
                                       do_action_status='completed')
@@ -212,6 +203,34 @@ class DigitalOceanDeviceAPI(object):
                                       format(r=action.status))
 
         return action and action.status == 'completed'
+
+    def _iterations_until(self, completed, update_state, argument):
+        """ Poll for a state change to complete callable-s
+
+        :param completed: A callable accepting argument, returning true if the
+        state change has successfully completed.
+        :param update_state: The action to execute in order to poll for a state
+        change
+        :param argument: The arguments on which to execute both the check and
+        the action. Probably a tuple.
+        :return: The number of iterations taken
+        """
+
+        if completed(*argument):
+            return 0
+        s = scheduler(time.time, time.sleep)
+        i = 0
+        started_at = time.time()
+        while not completed(*argument) and not self._has_timed_out(started_at):
+            delta = max(0, min(self._poll,
+                               self._timeout - (time.time() - started_at)))
+            s.enter(delta, 0, update_state, argument)
+            s.run()
+            i += 1
+        return i
+
+    def _has_timed_out(self, from_time):
+        return time.time() - from_time >= self._timeout
 
     def list_volumes(self):
         with start_action(action_type=six.text_type(
