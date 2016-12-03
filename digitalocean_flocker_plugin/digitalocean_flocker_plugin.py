@@ -52,11 +52,18 @@ class DigitalOceanDeviceAPI(object):
     - Only five volumes can be attached to a droplet at any given time.
     - It is possible for multiple flocker clusters to coexist, but they must
       not share dataset IDs.
+
+    :ivar six.text_type _cluster_id: ID of the cluster
+    :ivar Manager _manager: The DO manager object
+    :ivar Metadata _metadata: Metadata of the node runnign the agent (nullable)
+    :ivar float _poll: Interval for polling state changes of actions, in seconds
+    :ivar float _timeout: Maximum duration to wait for an action to complete
     """
 
-    _ONE_GIB = int(GiB(1).to_Byte().value)
+    _ONE_GIB = int(GiB(1).to_Byte().value)  # This constant is used for the
+    #                                         allocation unit
 
-    _PREFIX = six.text_type("flocker-v1-")
+    _PREFIX = six.text_type("flocker-v1-")  # Prefix for volume IDs
 
     # We reassign the Volume and Action class as attributes to help
     # ergonomics in our test suite.
@@ -72,6 +79,10 @@ class DigitalOceanDeviceAPI(object):
 
     @property
     def metadata(self):
+        """The metadata of the node running the agent. Lazily resolved
+        :return: The metadata object describing the node.
+        :rtype: Metadata
+        """
         if not self._metadata:
             self._metadata = Metadata()
         if not self._metadata.droplet_id:
@@ -90,6 +101,7 @@ class DigitalOceanDeviceAPI(object):
         """ Returns the description this flocker cluster should use
 
         :return: The cluster ID property string to use as a description
+        :rtype: six.text_type
         """
         return six.text_type(
             "flocker-v1-cluster-id: {cluster_id}").format(
@@ -101,7 +113,13 @@ class DigitalOceanDeviceAPI(object):
     def compute_instance_id(self):
         return six.text_type(self.metadata.droplet_id)
 
-    def get_volume(self, blockdevice_id):
+    def _get_volume(self, blockdevice_id):
+        """Return the DigitalOcean volume associated with this block device ID
+
+        :param blockdevice_id: The block device ID to look up
+        :return: A ``digitalocean.Volume`` instance describing the block device
+        :rtype: digitalocean.Volume.Volume
+        """
         with start_action(action_type=six.text_type(
                     "flocker:node:agents:do:get_volume"),
                     blockdevice_id=blockdevice_id) as a:
@@ -121,6 +139,7 @@ class DigitalOceanDeviceAPI(object):
         :param vol_name: The name of the digitalocean volume
         :return: The dataset UUID encoded therein or None, if not a flocker
                  volume
+        :rtype: UUID
         """
         if vol_name and vol_name.startswith(cls._PREFIX):
             return UUID(vol_name[len(cls._PREFIX):])
@@ -140,7 +159,9 @@ class DigitalOceanDeviceAPI(object):
         """Turns a digitalocean volume description into a flocker one
 
         :param do_volume: The digital ocean volume
+        :type do_volume: digitalocean.Volume.Volume
         :return: The corresponding BlockDeviceVolume
+        :rtype: BlockDeviceVolume
         """
         size = int(GiB(do_volume.size_gigabytes).to_Byte().value)
         attached = None
@@ -157,8 +178,11 @@ class DigitalOceanDeviceAPI(object):
         """ Reduce function to categorise whether a volume is usable.
         :param result_dict: A dictionary with three keys: ignored,
                             wrong_cluster, and okay
+        :type result_dict: dict[str, list[digitalocean.Volume.Volume]]
         :param vol: A digitalocean volume
+        :type vol: digitalocean.Volume.Volume
         :return: The result_dict with vol sorted into the correct slot
+        :rtype: dict[str, list[digitalocean.Volume.Volume]]
         """
         if not six.text_type(vol.name).startswith(self ._PREFIX):
             result_dict["ignored"].append(vol)
@@ -169,11 +193,25 @@ class DigitalOceanDeviceAPI(object):
         return result_dict
 
     def _await_action_id(self, action_id):
+        """Waits for an operation (specified by it's id) to complete
+
+        :param action_id: The identifier of the action
+        :type action_id: int
+        :return: Whether the action was successful
+        :rtype: bool
+        """
         action = self.Action.get_object(self._manager.token,
                                         action_id)
         return self._await_action(action)
 
     def _await_action(self, action):
+        """Waits for an operation to complete
+
+        :param action: A action object to operate on
+        :type action: ``digitalocean.Action.Action``
+        :return: Whether the action was successful
+        :rtype: bool
+        """
         if action and action.status == 'completed':
             return True
         elif not action:
@@ -214,6 +252,7 @@ class DigitalOceanDeviceAPI(object):
         :param argument: The arguments on which to execute both the check and
         the action. Probably a tuple.
         :return: The number of iterations taken
+        :rtype: int
         """
 
         if completed(*argument):
@@ -230,6 +269,12 @@ class DigitalOceanDeviceAPI(object):
         return i
 
     def _has_timed_out(self, from_time):
+        """ Compare the current time to from_time and check for timeout.
+
+        :param from_time: The time when the operaiton was started
+        :return: Whether a timeout has occurred
+        :rtype: bool
+        """
         return time.time() - from_time >= self._timeout
 
     def list_volumes(self):
@@ -298,7 +343,7 @@ class DigitalOceanDeviceAPI(object):
                 "flocker:node:agents:do:destroy_volume"),
                 blockdevice_id=blockdevice_id):
             try:
-                vol = self.get_volume(blockdevice_id)
+                vol = self._get_volume(blockdevice_id)
                 if vol.droplet_ids:
                     # need to detach prior to deletion
                     ty = six.text_type('flocker:node:agents:do') + \
@@ -323,7 +368,7 @@ class DigitalOceanDeviceAPI(object):
                 blockdevice_id=blockdevice_id,
                 droplet_id=attach_to):
             try:
-                vol = self.get_volume(blockdevice_id)
+                vol = self._get_volume(blockdevice_id)
                 if vol.droplet_ids:
                     raise AlreadyAttachedVolume(blockdevice_id)
                 r = vol.attach(attach_to, vol.region["slug"])
@@ -338,7 +383,7 @@ class DigitalOceanDeviceAPI(object):
                 "flocker:node:agents:do:detach_volume"),
                 blockdevice_id=blockdevice_id) as a:
             try:
-                vol = self.get_volume(blockdevice_id)
+                vol = self._get_volume(blockdevice_id)
                 if not vol.droplet_ids:
                     raise UnattachedVolume(blockdevice_id)
                 detach_from = vol.droplet_ids[0]
@@ -357,7 +402,7 @@ class DigitalOceanDeviceAPI(object):
 
     def get_device_path(self, blockdevice_id):
         try:
-            vol = self.get_volume(blockdevice_id)
+            vol = self._get_volume(blockdevice_id)
             path = FilePath(six.text_type(
                     "/dev/disk/by-id/scsi-0DO_Volume_{name}").format(
                     name=vol.name))

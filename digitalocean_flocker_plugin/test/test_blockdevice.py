@@ -213,7 +213,7 @@ class TestBlockDeviceAPI(unittest.TestCase):
         volumes = dict(map(lambda k: (k, self._populate_volume(k)),
                            VOLUME_MOCK_DATA.keys()))
         mock_get_volume.side_effect = lambda s, x: volumes[x]
-        v = self._api.get_volume(six.text_type('1234'))
+        v = self._api._get_volume(six.text_type('1234'))
         self.assertEqual(v, volumes['1234'])
 
     @mock.patch.object(Metadata, 'load',
