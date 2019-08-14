@@ -1,6 +1,8 @@
 A Flocker Dataset Backend for DigitalOcean Block Storage
 ========================================================
 
+**Notice** Flocker has been abandoned, making this plugin essentially useless.
+
 This plugin allows you to use flocker to manage DigitalOcean block storage
 volumes. Enable by letting `python setup.py install` install into a location
 searchable by flocker and put the following into your `agent.yml` file:
